@@ -18,7 +18,6 @@ from typing import Optional
 import httpx
 from authlib.integrations.requests_client import OAuth2Session
 from flask import (
-    Blueprint,
     jsonify,
     make_response,
     redirect,
@@ -26,6 +25,7 @@ from flask import (
     session,
     url_for,
 )
+from flask_smorest import Blueprint
 
 from .config import PluginConfig
 from .jwt_utils import JwtTokenGenerator
@@ -33,8 +33,13 @@ from .user_provisioning import UserProvisioner
 
 logger = logging.getLogger(__name__)
 
-# Create the blueprint
-oauth2_bp = Blueprint("oauth2_auth", __name__, url_prefix="/auth")
+# Create the blueprint using flask_smorest Blueprint (required by dservercore)
+oauth2_bp = Blueprint(
+    "oauth2_auth",
+    __name__,
+    url_prefix="/auth",
+    description="OAuth2 authentication endpoints"
+)
 
 # Plugin configuration (initialized on first request)
 _config: PluginConfig = None
@@ -166,10 +171,13 @@ def login():
         # Generate state for CSRF protection
         state = secrets.token_urlsafe(32)
         session["oauth2_state"] = state
+        session.modified = True  # Ensure session is saved
 
         # Store the return URL
         next_url = request.args.get("next", config.login_success_redirect)
         session["auth_return_url"] = next_url
+
+        logger.debug(f"Login: Generated state={state[:16]}..., session keys={list(session.keys())}")
 
         # Build authorization URL
         oauth = create_oauth2_session()
@@ -179,6 +187,7 @@ def login():
         )
 
         logger.info(f"Initiating OAuth2 login, redirecting to provider")
+        logger.debug(f"Authorization URL: {authorization_url}")
         return redirect(authorization_url)
 
     except Exception as e:
@@ -201,8 +210,13 @@ def callback():
         state = request.args.get("state")
         stored_state = session.pop("oauth2_state", None)
 
+        logger.debug(f"Callback: Received state={state[:16] if state else 'None'}..., "
+                    f"stored_state={stored_state[:16] if stored_state else 'None'}..., "
+                    f"session keys={list(session.keys())}")
+
         if not state or state != stored_state:
-            logger.warning("OAuth2 state mismatch - possible CSRF attack")
+            logger.warning(f"OAuth2 state mismatch - state={state}, stored_state={stored_state}")
+            logger.warning(f"Session contents: {dict(session)}")
             return redirect(config.login_error_redirect)
 
         # Check for errors from provider
@@ -287,7 +301,14 @@ def callback():
         # Redirect to frontend with token
         return_url = session.pop("auth_return_url", config.login_success_redirect)
 
-        response = make_response(redirect(return_url))
+        # Append token as query parameter for cross-origin webapp
+        # The webapp will read this and use it to authenticate
+        separator = "&" if "?" in return_url else "?"
+        redirect_url = f"{return_url}{separator}token={token}"
+
+        response = make_response(redirect(redirect_url))
+
+        # Also set cookie for same-origin access
         response.set_cookie(
             "dserver_token",
             token,

@@ -2,7 +2,7 @@
 dserver plugin registration for OAuth2 token generator.
 
 This module provides the plugin class that integrates with dservercore's
-plugin discovery system.
+plugin discovery system via the ExtensionABC interface.
 """
 
 import logging
@@ -21,6 +21,8 @@ class OAuth2TokenGeneratorPlugin:
 
     This plugin provides OAuth 2.0 authentication for users via any
     OAuth2/OIDC compliant Identity Provider and issues JWT tokens.
+
+    Implements the dservercore ExtensionABC interface.
     """
 
     def __init__(self, app: Flask = None):
@@ -36,11 +38,11 @@ class OAuth2TokenGeneratorPlugin:
         if app is not None:
             self.init_app(app)
 
-    def init_app(self, app: Flask):
+    def init_app(self, app: Flask, *args, **kwargs):
         """
         Initialize the plugin with a Flask application.
 
-        This registers the blueprint and configures the plugin.
+        This is called by dservercore's app factory.
 
         Args:
             app: Flask application instance
@@ -56,13 +58,8 @@ class OAuth2TokenGeneratorPlugin:
                 "Flask SECRET_KEY not set. Sessions will not persist across restarts."
             )
 
-        # Ensure session cookie settings are secure
-        app.config.setdefault("SESSION_COOKIE_SECURE", True)
-        app.config.setdefault("SESSION_COOKIE_HTTPONLY", True)
-        app.config.setdefault("SESSION_COOKIE_SAMESITE", "Lax")
-
-        # Register the blueprint
-        app.register_blueprint(oauth2_bp)
+        logger.debug(f"Session config: SECURE={app.config.get('SESSION_COOKIE_SECURE')}, "
+                    f"SAMESITE={app.config.get('SESSION_COOKIE_SAMESITE')}")
 
         logger.info("OAuth2 Token Generator plugin initialized")
         logger.info(f"OAuth2 Provider: {self.config.oauth2.name}")
@@ -70,6 +67,42 @@ class OAuth2TokenGeneratorPlugin:
             logger.info(f"Authorization URL: {self.config.oauth2.authorization_url}")
         else:
             logger.warning("OAuth2 not fully configured - OAUTH2_AUTHORIZATION_URL not set")
+
+    def get_blueprint(self):
+        """
+        Return the Flask blueprint for this extension.
+
+        Required by dservercore ExtensionABC.
+        """
+        return oauth2_bp
+
+    def register_dataset(self, dataset_info):
+        """
+        Register a dataset (no-op for auth plugin).
+
+        Required by dservercore PluginABC but not used for authentication.
+        """
+        pass
+
+    def get_config(self):
+        """
+        Return plugin configuration dictionary.
+
+        Required by dservercore PluginABC.
+        This is loaded BEFORE init_app, so session settings go here.
+        """
+        return {
+            # Session cookie settings for OAuth2 flow
+            # SECURE must be False for HTTP (dev), True for HTTPS (prod)
+            # SAMESITE must be "Lax" for OAuth2 redirects to work
+            "SESSION_COOKIE_SECURE": False,
+            "SESSION_COOKIE_HTTPONLY": True,
+            "SESSION_COOKIE_SAMESITE": "Lax",
+        }
+
+    def get_config_secrets_to_obfuscate(self):
+        """Return config keys that should not be exposed."""
+        return ["OAUTH2_CLIENT_SECRET"]
 
     @staticmethod
     def get_name() -> str:
