@@ -52,7 +52,27 @@ After saving, you'll receive:
 
 ### 3. Configure the Plugin
 
-Add these environment variables to your `docker-compose.yml`:
+#### Set Credentials via .env File
+
+Store your ORCID credentials in a `.env` file (never commit this to version control):
+
+```bash
+# Copy the template
+cp .env.template .env
+
+# Edit with your credentials
+nano .env
+```
+
+Add your credentials to `.env`:
+```bash
+OAUTH2_CLIENT_ID=APP-XXXXXXXXXXXX
+OAUTH2_CLIENT_SECRET=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
+#### Configure docker-compose.yml
+
+The other settings are configured in `docker-compose.yml`:
 
 ```yaml
 environment:
@@ -69,9 +89,9 @@ environment:
   # OAUTH2_AUTHORIZATION_URL: "https://sandbox.orcid.org/oauth/authorize"
   # OAUTH2_TOKEN_URL: "https://sandbox.orcid.org/oauth/token"
 
-  # Your credentials from ORCID developer tools
-  OAUTH2_CLIENT_ID: "APP-XXXXXXXXXXXX"
-  OAUTH2_CLIENT_SECRET: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+  # Credentials loaded from .env file
+  OAUTH2_CLIENT_ID: "${OAUTH2_CLIENT_ID:-}"
+  OAUTH2_CLIENT_SECRET: "${OAUTH2_CLIENT_SECRET:-}"
 
   # ORCID-specific settings
   OAUTH2_SCOPE: "/authenticate"

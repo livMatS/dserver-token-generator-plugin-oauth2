@@ -41,6 +41,22 @@ pip install -e .
 | `OAUTH2_CLIENT_ID` | Your application's client ID |
 | `OAUTH2_CLIENT_SECRET` | Your application's client secret |
 
+**Security Note**: For credentials (`OAUTH2_CLIENT_ID` and `OAUTH2_CLIENT_SECRET`), use a `.env` file instead of hardcoding them in `docker-compose.yml`:
+
+```bash
+# Copy the template
+cp .env.template .env
+
+# Edit with your credentials
+nano .env
+```
+
+The `docker-compose.yml` uses variable substitution to read these values:
+```yaml
+OAUTH2_CLIENT_ID: "${OAUTH2_CLIENT_ID:-}"
+OAUTH2_CLIENT_SECRET: "${OAUTH2_CLIENT_SECRET:-}"
+```
+
 ### Optional Environment Variables
 
 #### Provider Settings
