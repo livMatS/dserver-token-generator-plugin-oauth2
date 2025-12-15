@@ -46,6 +46,9 @@ class UserProvisioner:
         """
         Return user info after OAuth2 authentication.
 
+        If the user exists in dserver and their display_name is not set,
+        it will be updated from the OAuth2 provider data.
+
         Note: Users must be pre-registered in dserver via the CLI.
         This method does not create users.
 
@@ -65,6 +68,21 @@ class UserProvisioner:
         if not display_name and (given_name or surname):
             parts = [p for p in [given_name, surname] if p]
             display_name = " ".join(parts)
+
+        # Try to update display_name in dserver database if not already set
+        if display_name:
+            try:
+                from dservercore.sql_models import User
+                from dservercore import sql_db
+
+                user = User.query.filter_by(username=username).first()
+                if user and not user.display_name:
+                    user.display_name = display_name
+                    sql_db.session.commit()
+                    logger.info(f"Updated display_name for user {username}")
+            except Exception as e:
+                # Don't fail authentication if display_name update fails
+                logger.warning(f"Could not update display_name for {username}: {e}")
 
         user_info = {
             "username": username,
