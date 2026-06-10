@@ -136,6 +136,16 @@ class PluginConfig:
     login_success_redirect: str = "/"
     login_error_redirect: str = "/login?error=auth_failed"
 
+    # Token delivery after login. When True, the JWT is appended to the
+    # post-login redirect as a URL fragment (#token=...), which is never
+    # sent to servers and enables webapps served from a different origin
+    # than this endpoint. When False, the token is delivered via the
+    # HttpOnly cookie only and never appears in the URL at all; this
+    # requires the webapp to share the origin of this endpoint (e.g.
+    # behind a common reverse proxy) and to obtain the token via
+    # GET /auth/token using the session cookie.
+    deliver_token_in_fragment: bool = True
+
     @classmethod
     def from_env(cls) -> "PluginConfig":
         """Create configuration from environment variables."""
@@ -156,6 +166,9 @@ class PluginConfig:
             login_error_redirect=os.environ.get(
                 "OAUTH2_LOGIN_ERROR_REDIRECT", "/login?error=auth_failed"
             ),
+            deliver_token_in_fragment=os.environ.get(
+                "OAUTH2_DELIVER_TOKEN_IN_FRAGMENT", "true"
+            ).lower() == "true",
         )
 
 

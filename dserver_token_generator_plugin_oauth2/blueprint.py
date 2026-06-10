@@ -330,21 +330,28 @@ def callback():
         session["jwt_token"] = token
         session["provider"] = config.oauth2.name
 
-        # Redirect to frontend with token
+        # Redirect to frontend
         return_url = session.pop("auth_return_url", config.login_success_redirect)
         if not is_safe_return_url(return_url, config):
             return_url = config.login_success_redirect
 
-        # Deliver the token in the URL fragment: fragments are never sent
-        # to servers, so the token stays out of server logs, proxies and
-        # Referer headers (unlike a query parameter).
-        redirect_url = f"{return_url}#token={token}"
+        if config.deliver_token_in_fragment:
+            # Deliver the token in the URL fragment: fragments are never
+            # sent to servers, so the token stays out of server logs,
+            # proxies and Referer headers (unlike a query parameter). This
+            # supports webapps served from a different origin than this
+            # endpoint.
+            response = make_response(redirect(f"{return_url}#token={token}"))
+        else:
+            # Cookie-only delivery: the token never appears in the URL at
+            # all (not even in browser history). This requires the webapp
+            # to be served from the same origin as this endpoint (e.g.
+            # behind a shared reverse proxy) and to obtain the token via
+            # GET /auth/token using the session cookie.
+            response = make_response(redirect(return_url))
 
-        response = make_response(redirect(redirect_url))
-
-        # Also set cookie for same-origin access. HttpOnly keeps the
-        # cookie out of reach of injected JavaScript; the webapp receives
-        # the token via the fragment above instead.
+        # Set cookie for same-origin access. HttpOnly keeps the cookie out
+        # of reach of injected JavaScript.
         response.set_cookie(
             "dserver_token",
             token,

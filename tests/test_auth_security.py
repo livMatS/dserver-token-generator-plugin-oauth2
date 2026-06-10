@@ -128,3 +128,24 @@ def test_callback_cookie_is_httponly(client, authenticated_callback):
     ]
     assert cookie_headers, "expected a dserver_token cookie"
     assert all("HttpOnly" in header for header in cookie_headers)
+
+
+def test_callback_cookie_only_mode_keeps_token_out_of_url(
+        monkeypatch, client, authenticated_callback):
+    """With OAUTH2_DELIVER_TOKEN_IN_FRAGMENT=false the token must not
+    appear anywhere in the redirect URL (cookie-only, same-origin
+    deployments)."""
+    monkeypatch.setenv("OAUTH2_DELIVER_TOKEN_IN_FRAGMENT", "false")
+    monkeypatch.setattr(bp_module, "_config", None)  # re-read env
+
+    response = authenticated_callback(next_url=f"{FRONTEND}/")
+    assert response.status_code == 302
+    assert "FAKE.JWT.TOKEN" not in response.location
+    assert "#" not in response.location
+
+    cookie_headers = [
+        value for name, value in response.headers.items()
+        if name.lower() == "set-cookie" and "dserver_token" in value
+    ]
+    assert cookie_headers, "expected a dserver_token cookie"
+    assert all("HttpOnly" in header for header in cookie_headers)
