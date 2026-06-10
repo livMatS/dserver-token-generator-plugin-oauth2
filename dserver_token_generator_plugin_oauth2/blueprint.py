@@ -298,17 +298,15 @@ def callback():
         session["jwt_token"] = token
         session["provider"] = config.oauth2.name
 
-        # Redirect to frontend with token
+        # Redirect to frontend
         return_url = session.pop("auth_return_url", config.login_success_redirect)
 
-        # Append token as query parameter for cross-origin webapp
-        # The webapp will read this and use it to authenticate
-        separator = "&" if "?" in return_url else "?"
-        redirect_url = f"{return_url}{separator}token={token}"
+        response = make_response(redirect(return_url))
 
-        response = make_response(redirect(redirect_url))
-
-        # Also set cookie for same-origin access
+        # Deliver the token via a cookie rather than a query parameter so it
+        # does not end up in browser history, Referer headers, or proxy logs.
+        # This requires the webapp to be served from the same origin as this
+        # endpoint (e.g. behind a shared reverse proxy).
         response.set_cookie(
             "dserver_token",
             token,
