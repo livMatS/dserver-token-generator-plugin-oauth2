@@ -1,0 +1,130 @@
+"""Security tests for the OAuth2 login/callback flow.
+
+These encode the fixes for the 2026-06 audit findings: open redirect via
+?next=, JWT delivered as a query parameter, and a JS-readable token cookie.
+"""
+
+import pytest
+
+import dserver_token_generator_plugin_oauth2.blueprint as bp_module
+
+from .conftest import FRONTEND
+
+
+class FakeOAuthSession:
+    def fetch_token(self, url, **kwargs):
+        return {"sub": "user1", "name": "User One"}
+
+
+class FakeProvisioner:
+    def provision_user(self, username, **kwargs):
+        return {"username": username, "email": None,
+                "display_name": None, "permissions": ["search"]}
+
+
+class FakeJwtGenerator:
+    def generate_token(self, username, **kwargs):
+        return "FAKE.JWT.TOKEN"
+
+
+@pytest.fixture
+def authenticated_callback(monkeypatch, client):
+    """Prime the session state and stub out provider/JWT interactions."""
+    monkeypatch.setattr(
+        bp_module, "create_oauth2_session", lambda: FakeOAuthSession())
+    monkeypatch.setattr(bp_module, "_user_provisioner", FakeProvisioner())
+    monkeypatch.setattr(bp_module, "_jwt_generator", FakeJwtGenerator())
+
+    def call(state="good-state", query_state="good-state", next_url=None):
+        with client.session_transaction() as session:
+            session["oauth2_state"] = state
+            if next_url is not None:
+                session["auth_return_url"] = next_url
+        return client.get(
+            f"/auth/callback?state={query_state}&code=auth-code")
+
+    return call
+
+
+# --- Open redirect via ?next= -------------------------------------------
+
+def test_login_rejects_foreign_origin_next(client):
+    response = client.get("/auth/login?next=https://evil.example/steal")
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert "evil.example" not in session.get("auth_return_url", "")
+
+
+def test_login_rejects_protocol_relative_next(client):
+    response = client.get("/auth/login?next=//evil.example/steal")
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert "evil.example" not in session.get("auth_return_url", "")
+
+
+def test_login_accepts_relative_next(client):
+    response = client.get("/auth/login?next=/datasets/abc")
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert session["auth_return_url"] == "/datasets/abc"
+
+
+def test_login_accepts_frontend_origin_next(client):
+    response = client.get(f"/auth/login?next={FRONTEND}/datasets/abc")
+    assert response.status_code == 302
+    with client.session_transaction() as session:
+        assert session["auth_return_url"] == f"{FRONTEND}/datasets/abc"
+
+
+def test_login_redirects_to_provider_with_state(client):
+    response = client.get("/auth/login")
+    assert response.status_code == 302
+    assert response.location.startswith("https://provider.example/authorize")
+    assert "state=" in response.location
+    with client.session_transaction() as session:
+        assert session["oauth2_state"]
+
+
+# --- State (CSRF) validation ----------------------------------------------
+
+def test_callback_rejects_wrong_state(client, authenticated_callback):
+    response = authenticated_callback(
+        state="good-state", query_state="attacker-state")
+    assert response.status_code == 302
+    assert "error=auth_failed" in response.location
+    assert "FAKE.JWT.TOKEN" not in response.location
+
+
+def test_callback_rejects_missing_state(client, authenticated_callback,
+                                        monkeypatch):
+    monkeypatch.setattr(
+        bp_module, "create_oauth2_session", lambda: FakeOAuthSession())
+    response = client.get("/auth/callback?code=auth-code")
+    assert response.status_code == 302
+    assert "error=auth_failed" in response.location
+
+
+# --- Token delivery --------------------------------------------------------
+
+def test_callback_token_not_in_query_string(client, authenticated_callback):
+    """The JWT must not ride in the query string (history, logs, Referer)."""
+    response = authenticated_callback(next_url=f"{FRONTEND}/")
+    assert response.status_code == 302
+    query = response.location.split("#")[0]
+    assert "token=" not in query
+
+
+def test_callback_token_delivered_in_fragment(client, authenticated_callback):
+    response = authenticated_callback(next_url=f"{FRONTEND}/")
+    assert response.status_code == 302
+    assert "#token=FAKE.JWT.TOKEN" in response.location
+
+
+def test_callback_cookie_is_httponly(client, authenticated_callback):
+    response = authenticated_callback(next_url=f"{FRONTEND}/")
+    cookie_headers = [
+        value for name, value in response.headers.items()
+        if name.lower() == "set-cookie" and "dserver_token" in value
+    ]
+    assert cookie_headers, "expected a dserver_token cookie"
+    assert all("HttpOnly" in header for header in cookie_headers)

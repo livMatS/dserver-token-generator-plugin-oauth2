@@ -14,6 +14,7 @@ This blueprint provides the following endpoints:
 import logging
 import secrets
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 from authlib.integrations.requests_client import OAuth2Session
@@ -125,6 +126,37 @@ def extract_user_info(token_response: dict, userinfo: Optional[dict] = None) -> 
     return user_data
 
 
+def is_safe_return_url(url: str, config: PluginConfig) -> bool:
+    """Return True if a post-login redirect target is safe to use.
+
+    Only relative paths and absolute URLs on explicitly trusted origins
+    (frontend URL, configured redirect targets, base URL) are allowed.
+    Anything else enables an open redirect that leaks the JWT to an
+    attacker-controlled site.
+    """
+    if not url:
+        return False
+
+    parsed = urlparse(url)
+    if not parsed.scheme and not parsed.netloc:
+        # Relative path. Exclude protocol-relative ("//host") and
+        # backslash variants some browsers normalize to "//".
+        return url.startswith("/") and not url.startswith("//") \
+            and not url.startswith("/\\")
+
+    trusted_origins = set()
+    for candidate in (config.frontend_url, config.login_success_redirect,
+                      config.login_error_redirect, config.base_url):
+        if not candidate:
+            continue
+        parsed_candidate = urlparse(candidate)
+        if parsed_candidate.scheme and parsed_candidate.netloc:
+            trusted_origins.add(
+                (parsed_candidate.scheme, parsed_candidate.netloc))
+
+    return (parsed.scheme, parsed.netloc) in trusted_origins
+
+
 def get_username_from_user_data(user_data: dict) -> Optional[str]:
     """
     Determine the username from extracted user data.
@@ -173,11 +205,14 @@ def login():
         session["oauth2_state"] = state
         session.modified = True  # Ensure session is saved
 
-        # Store the return URL
-        next_url = request.args.get("next", config.login_success_redirect)
-        session["auth_return_url"] = next_url
-
-        logger.debug(f"Login: Generated state={state[:16]}..., session keys={list(session.keys())}")
+        # Store the return URL; reject untrusted targets to prevent an
+        # open redirect that would hand the JWT to an attacker's site.
+        next_url = request.args.get("next")
+        if next_url and not is_safe_return_url(next_url, config):
+            logger.warning(
+                f"Rejected untrusted post-login redirect target: {next_url}")
+            next_url = None
+        session["auth_return_url"] = next_url or config.login_success_redirect
 
         # Build authorization URL
         oauth = create_oauth2_session()
@@ -210,13 +245,10 @@ def callback():
         state = request.args.get("state")
         stored_state = session.pop("oauth2_state", None)
 
-        logger.debug(f"Callback: Received state={state[:16] if state else 'None'}..., "
-                    f"stored_state={stored_state[:16] if stored_state else 'None'}..., "
-                    f"session keys={list(session.keys())}")
-
-        if not state or state != stored_state:
-            logger.warning(f"OAuth2 state mismatch - state={state}, stored_state={stored_state}")
-            logger.warning(f"Session contents: {dict(session)}")
+        if not state or not stored_state or \
+                not secrets.compare_digest(state, stored_state):
+            # Do not log state values; they are security tokens.
+            logger.warning("OAuth2 state mismatch or missing state")
             return redirect(config.login_error_redirect)
 
         # Check for errors from provider
@@ -300,19 +332,23 @@ def callback():
 
         # Redirect to frontend with token
         return_url = session.pop("auth_return_url", config.login_success_redirect)
+        if not is_safe_return_url(return_url, config):
+            return_url = config.login_success_redirect
 
-        # Append token as query parameter for cross-origin webapp
-        # The webapp will read this and use it to authenticate
-        separator = "&" if "?" in return_url else "?"
-        redirect_url = f"{return_url}{separator}token={token}"
+        # Deliver the token in the URL fragment: fragments are never sent
+        # to servers, so the token stays out of server logs, proxies and
+        # Referer headers (unlike a query parameter).
+        redirect_url = f"{return_url}#token={token}"
 
         response = make_response(redirect(redirect_url))
 
-        # Also set cookie for same-origin access
+        # Also set cookie for same-origin access. HttpOnly keeps the
+        # cookie out of reach of injected JavaScript; the webapp receives
+        # the token via the fragment above instead.
         response.set_cookie(
             "dserver_token",
             token,
-            httponly=False,  # Allow JavaScript access
+            httponly=True,
             secure=request.is_secure,
             samesite="Lax",
             max_age=config.jwt.token_expiry_hours * 3600,

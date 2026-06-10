@@ -52,11 +52,21 @@ class OAuth2TokenGeneratorPlugin:
         # Load configuration
         self.config = PluginConfig.from_env()
 
-        # Configure Flask session
+        # Configure Flask session. The OAuth2 state (CSRF) token lives in
+        # the session, so an unset SECRET_KEY silently breaks logins on
+        # every restart and weakens session integrity.
         if not app.config.get("SECRET_KEY"):
-            logger.warning(
-                "Flask SECRET_KEY not set. Sessions will not persist across restarts."
-            )
+            if app.config.get("FLASK_ENV") == "development" or app.debug:
+                logger.warning(
+                    "Flask SECRET_KEY not set. Sessions will not persist "
+                    "across restarts."
+                )
+            else:
+                raise RuntimeError(
+                    "Flask SECRET_KEY must be set for the OAuth2 token "
+                    "generator: session-based CSRF protection depends on it. "
+                    "Set the SECRET_KEY environment variable."
+                )
 
         logger.debug(f"Session config: SECURE={app.config.get('SESSION_COOKIE_SECURE')}, "
                     f"SAMESITE={app.config.get('SESSION_COOKIE_SAMESITE')}")
