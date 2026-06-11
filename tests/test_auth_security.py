@@ -106,6 +106,13 @@ def test_callback_rejects_missing_state(client, authenticated_callback,
 
 # --- Token delivery --------------------------------------------------------
 
+def _token_cookie_headers(response):
+    return [
+        value for name, value in response.headers.items()
+        if name.lower() == "set-cookie" and "dserver_token" in value
+    ]
+
+
 def test_callback_token_not_in_query_string(client, authenticated_callback):
     """The JWT must not ride in the query string (history, logs, Referer)."""
     response = authenticated_callback(next_url=f"{FRONTEND}/")
@@ -120,21 +127,19 @@ def test_callback_token_delivered_in_fragment(client, authenticated_callback):
     assert "#token=FAKE.JWT.TOKEN" in response.location
 
 
-def test_callback_cookie_is_httponly(client, authenticated_callback):
+def test_callback_sets_no_token_cookie(client, authenticated_callback):
+    """The JWT lives in the server-side session only; duplicating it into
+    a cookie would create a second copy of the credential that nothing
+    consumes (the webapp cannot read an HttpOnly cookie)."""
     response = authenticated_callback(next_url=f"{FRONTEND}/")
-    cookie_headers = [
-        value for name, value in response.headers.items()
-        if name.lower() == "set-cookie" and "dserver_token" in value
-    ]
-    assert cookie_headers, "expected a dserver_token cookie"
-    assert all("HttpOnly" in header for header in cookie_headers)
+    assert not _token_cookie_headers(response)
 
 
-def test_callback_cookie_only_mode_keeps_token_out_of_url(
+def test_callback_session_only_mode_keeps_token_out_of_url(
         monkeypatch, client, authenticated_callback):
     """With OAUTH2_DELIVER_TOKEN_IN_FRAGMENT=false the token must not
-    appear anywhere in the redirect URL (cookie-only, same-origin
-    deployments)."""
+    appear anywhere in the redirect URL (session-only, same-origin
+    deployments); the webapp fetches it from GET /auth/token instead."""
     monkeypatch.setenv("OAUTH2_DELIVER_TOKEN_IN_FRAGMENT", "false")
     monkeypatch.setattr(bp_module, "_config", None)  # re-read env
 
@@ -142,10 +147,34 @@ def test_callback_cookie_only_mode_keeps_token_out_of_url(
     assert response.status_code == 302
     assert "FAKE.JWT.TOKEN" not in response.location
     assert "#" not in response.location
+    assert not _token_cookie_headers(response)
 
-    cookie_headers = [
-        value for name, value in response.headers.items()
-        if name.lower() == "set-cookie" and "dserver_token" in value
-    ]
-    assert cookie_headers, "expected a dserver_token cookie"
-    assert all("HttpOnly" in header for header in cookie_headers)
+    response = client.get("/auth/token")
+    assert response.status_code == 200
+    assert response.get_json()["token"] == "FAKE.JWT.TOKEN"
+
+
+def test_token_endpoint_requires_session(client):
+    response = client.get("/auth/token")
+    assert response.status_code == 401
+
+
+# --- Logout -----------------------------------------------------------------
+
+def test_logout_redirects_browser_and_clears_session(
+        client, authenticated_callback):
+    authenticated_callback(next_url=f"{FRONTEND}/")
+    response = client.get("/auth/logout")
+    assert response.status_code == 302
+    assert response.location.startswith(FRONTEND)
+    assert client.get("/auth/token").status_code == 401
+
+
+def test_logout_returns_json_for_xhr_and_clears_session(
+        client, authenticated_callback):
+    authenticated_callback(next_url=f"{FRONTEND}/")
+    response = client.post(
+        "/auth/logout", headers={"Accept": "application/json"})
+    assert response.status_code == 200
+    assert response.get_json() == {"success": True}
+    assert client.get("/auth/token").status_code == 401

@@ -113,6 +113,7 @@ The plugin needs to know how to extract user information from the OAuth2 provide
 | `OAUTH2_FRONTEND_URL` | Frontend base URL | `/` |
 | `OAUTH2_LOGIN_SUCCESS_REDIRECT` | Redirect after successful login | `/` |
 | `OAUTH2_LOGIN_ERROR_REDIRECT` | Redirect after failed login | `/login?error=auth_failed` |
+| `OAUTH2_DELIVER_TOKEN_IN_FRAGMENT` | Deliver the JWT in the redirect URL fragment (`#token=...`). Set to `false` for session-only delivery: the token never appears in any URL and the (same-origin) webapp fetches it from `GET /auth/token` using the session cookie | `true` |
 
 ## API Endpoints
 
@@ -124,7 +125,7 @@ All endpoints are under the `/auth` prefix.
 |----------|--------|-------------|
 | `/auth/login` | GET | Initiates OAuth2 flow, redirects to provider |
 | `/auth/callback` | GET | Receives authorization code, exchanges for token |
-| `/auth/logout` | GET | Clears session and token cookie |
+| `/auth/logout` | GET/POST | Clears the server-side session; redirects browsers to the frontend, returns JSON to clients that request it |
 
 ### Token Management
 

@@ -4,7 +4,7 @@ Flask blueprint for OAuth2 authentication.
 This blueprint provides the following endpoints:
 - GET /auth/login - Initiate OAuth2 authorization flow
 - GET /auth/callback - OAuth2 callback (receives authorization code)
-- GET /auth/logout - Clear session and logout
+- GET/POST /auth/logout - Clear session and logout
 - GET /auth/token - Get current user's JWT token
 - POST /auth/token - Exchange credentials for JWT token (API access)
 - POST /auth/refresh - Refresh an existing JWT token
@@ -343,23 +343,13 @@ def callback():
             # endpoint.
             response = make_response(redirect(f"{return_url}#token={token}"))
         else:
-            # Cookie-only delivery: the token never appears in the URL at
-            # all (not even in browser history). This requires the webapp
-            # to be served from the same origin as this endpoint (e.g.
-            # behind a shared reverse proxy) and to obtain the token via
-            # GET /auth/token using the session cookie.
+            # Session-only delivery: the token never appears in the URL at
+            # all (not even in browser history). The webapp obtains it via
+            # GET /auth/token, authenticated by the session cookie set
+            # above. This requires the webapp to be served from the same
+            # origin as this endpoint (e.g. behind a shared reverse proxy)
+            # or CORS with credentials.
             response = make_response(redirect(return_url))
-
-        # Set cookie for same-origin access. HttpOnly keeps the cookie out
-        # of reach of injected JavaScript.
-        response.set_cookie(
-            "dserver_token",
-            token,
-            httponly=True,
-            secure=request.is_secure,
-            samesite="Lax",
-            max_age=config.jwt.token_expiry_hours * 3600,
-        )
 
         logger.info(f"User {username} authenticated successfully via {config.oauth2.name}")
         return response
@@ -369,18 +359,27 @@ def callback():
         return redirect(get_config().login_error_redirect)
 
 
-@oauth2_bp.route("/logout")
+@oauth2_bp.route("/logout", methods=["GET", "POST"])
 def logout():
     """
-    Logout and clear session.
+    Logout and clear the server-side session.
+
+    Browser navigations are redirected back to the frontend; clients that
+    ask for JSON (e.g. the webapp terminating the session via XHR after a
+    local logout) receive a JSON response instead of a redirect.
     """
     config = get_config()
 
     # Clear session
     session.clear()
 
-    # Clear token cookie
-    response = make_response(redirect(config.frontend_url))
+    accepts = request.accept_mimetypes
+    if accepts.accept_json and not accepts.accept_html:
+        response = make_response(jsonify({"success": True}))
+    else:
+        response = make_response(redirect(config.frontend_url))
+
+    # Remove the token cookie set by older plugin versions.
     response.delete_cookie("dserver_token")
 
     logger.info("User logged out")
