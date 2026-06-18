@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 oauth2_bp = Blueprint(
     "oauth2_auth",
     __name__,
-    url_prefix="/auth",
+    url_prefix="/auth/oauth2",
     description="OAuth2 authentication endpoints"
 )
 
