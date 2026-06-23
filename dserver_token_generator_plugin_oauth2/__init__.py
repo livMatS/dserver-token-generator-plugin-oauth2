@@ -19,7 +19,16 @@ This plugin provides:
 - User auto-provisioning from OAuth2/OIDC claims
 """
 
-__version__ = "0.1.0"
+try:
+    from importlib.metadata import version, PackageNotFoundError
+except ModuleNotFoundError:
+    from importlib_metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version(__name__)
+except PackageNotFoundError:
+    # package is not installed
+    pass
 
 from .plugin import OAuth2TokenGeneratorPlugin
 from .blueprint import oauth2_bp

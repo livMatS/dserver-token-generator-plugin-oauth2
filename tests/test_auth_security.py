@@ -41,7 +41,7 @@ def authenticated_callback(monkeypatch, client):
             if next_url is not None:
                 session["auth_return_url"] = next_url
         return client.get(
-            f"/auth/callback?state={query_state}&code=auth-code")
+            f"/auth/oauth2/callback?state={query_state}&code=auth-code")
 
     return call
 
@@ -49,35 +49,35 @@ def authenticated_callback(monkeypatch, client):
 # --- Open redirect via ?next= -------------------------------------------
 
 def test_login_rejects_foreign_origin_next(client):
-    response = client.get("/auth/login?next=https://evil.example/steal")
+    response = client.get("/auth/oauth2/login?next=https://evil.example/steal")
     assert response.status_code == 302
     with client.session_transaction() as session:
         assert "evil.example" not in session.get("auth_return_url", "")
 
 
 def test_login_rejects_protocol_relative_next(client):
-    response = client.get("/auth/login?next=//evil.example/steal")
+    response = client.get("/auth/oauth2/login?next=//evil.example/steal")
     assert response.status_code == 302
     with client.session_transaction() as session:
         assert "evil.example" not in session.get("auth_return_url", "")
 
 
 def test_login_accepts_relative_next(client):
-    response = client.get("/auth/login?next=/datasets/abc")
+    response = client.get("/auth/oauth2/login?next=/datasets/abc")
     assert response.status_code == 302
     with client.session_transaction() as session:
         assert session["auth_return_url"] == "/datasets/abc"
 
 
 def test_login_accepts_frontend_origin_next(client):
-    response = client.get(f"/auth/login?next={FRONTEND}/datasets/abc")
+    response = client.get(f"/auth/oauth2/login?next={FRONTEND}/datasets/abc")
     assert response.status_code == 302
     with client.session_transaction() as session:
         assert session["auth_return_url"] == f"{FRONTEND}/datasets/abc"
 
 
 def test_login_redirects_to_provider_with_state(client):
-    response = client.get("/auth/login")
+    response = client.get("/auth/oauth2/login")
     assert response.status_code == 302
     assert response.location.startswith("https://provider.example/authorize")
     assert "state=" in response.location
@@ -99,7 +99,7 @@ def test_callback_rejects_missing_state(client, authenticated_callback,
                                         monkeypatch):
     monkeypatch.setattr(
         bp_module, "create_oauth2_session", lambda: FakeOAuthSession())
-    response = client.get("/auth/callback?code=auth-code")
+    response = client.get("/auth/oauth2/callback?code=auth-code")
     assert response.status_code == 302
     assert "error=auth_failed" in response.location
 
@@ -139,7 +139,7 @@ def test_callback_session_only_mode_keeps_token_out_of_url(
         monkeypatch, client, authenticated_callback):
     """With OAUTH2_DELIVER_TOKEN_IN_FRAGMENT=false the token must not
     appear anywhere in the redirect URL (session-only, same-origin
-    deployments); the webapp fetches it from GET /auth/token instead."""
+    deployments); the webapp fetches it from GET /auth/oauth2/token instead."""
     monkeypatch.setenv("OAUTH2_DELIVER_TOKEN_IN_FRAGMENT", "false")
     monkeypatch.setattr(bp_module, "_config", None)  # re-read env
 
@@ -149,13 +149,13 @@ def test_callback_session_only_mode_keeps_token_out_of_url(
     assert "#" not in response.location
     assert not _token_cookie_headers(response)
 
-    response = client.get("/auth/token")
+    response = client.get("/auth/oauth2/token")
     assert response.status_code == 200
     assert response.get_json()["token"] == "FAKE.JWT.TOKEN"
 
 
 def test_token_endpoint_requires_session(client):
-    response = client.get("/auth/token")
+    response = client.get("/auth/oauth2/token")
     assert response.status_code == 401
 
 
@@ -164,17 +164,17 @@ def test_token_endpoint_requires_session(client):
 def test_logout_redirects_browser_and_clears_session(
         client, authenticated_callback):
     authenticated_callback(next_url=f"{FRONTEND}/")
-    response = client.get("/auth/logout")
+    response = client.get("/auth/oauth2/logout")
     assert response.status_code == 302
     assert response.location.startswith(FRONTEND)
-    assert client.get("/auth/token").status_code == 401
+    assert client.get("/auth/oauth2/token").status_code == 401
 
 
 def test_logout_returns_json_for_xhr_and_clears_session(
         client, authenticated_callback):
     authenticated_callback(next_url=f"{FRONTEND}/")
     response = client.post(
-        "/auth/logout", headers={"Accept": "application/json"})
+        "/auth/oauth2/logout", headers={"Accept": "application/json"})
     assert response.status_code == 200
     assert response.get_json() == {"success": True}
-    assert client.get("/auth/token").status_code == 401
+    assert client.get("/auth/oauth2/token").status_code == 401

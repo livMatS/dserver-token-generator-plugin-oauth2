@@ -1,24 +1,17 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["flit_scm"]
+build-backend = "flit_scm:buildapi"
 
 [project]
 name = "dserver-token-generator-plugin-oauth2"
-version = "0.1.0"
 description = "OAuth 2.0 token generator plugin for dserver"
 readme = "README.md"
 license = {text = "MIT"}
 authors = [
-    {name = "Your Name", email = "your.email@example.com"}
+    {name = "Lars Pastewka", email = "lars.pastewka@imtek.uni-freiburg.de"},
+    {name = "Johannes L. Hörmann", email = "johannes.laurin@gmail.com"},
 ]
-classifiers = [
-    "Development Status :: 3 - Alpha",
-    "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
-    "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
-]
+dynamic = ["version"]
 requires-python = ">=3.10"
 dependencies = [
     "flask>=2.0.0",
@@ -31,11 +24,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "responses>=0.23.0",
+test = [
+    "dservercore",
+    "pytest",
+    "pytest-cov",
+    "responses",
 ]
+
+[project.urls]
+Repository = "https://github.com/livMatS/dserver-token-generator-plugin-oauth2"
 
 [project.entry-points."dservercore.extension"]
 oauth2 = "dserver_token_generator_plugin_oauth2:OAuth2TokenGeneratorPlugin"
@@ -43,9 +40,13 @@ oauth2 = "dserver_token_generator_plugin_oauth2:OAuth2TokenGeneratorPlugin"
 [project.entry-points."flask.commands"]
 oauth2 = "dserver_token_generator_plugin_oauth2.cli:oauth2_cli"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["dserver_token_generator_plugin_oauth2*"]
+[tool.flit.module]
+name = "dserver_token_generator_plugin_oauth2"
+
+[tool.setuptools_scm]
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+write_to = "dserver_token_generator_plugin_oauth2/version.py"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
