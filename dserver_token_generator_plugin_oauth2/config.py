@@ -82,7 +82,7 @@ class OAuth2ProviderConfig:
             response_type=os.environ.get("OAUTH2_RESPONSE_TYPE", "code"),
             redirect_uri=os.environ.get(
                 "OAUTH2_REDIRECT_URI",
-                f"{base_url}/auth/callback"
+                f"{base_url}/auth/oauth2/callback"
             ),
             attribute_map=attribute_map,
             username_field=os.environ.get("OAUTH2_USERNAME_FIELD", "user_id"),
